@@ -1,0 +1,285 @@
+{
+  "name": "Research Agent - Query & Retrieval",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "research-query",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 400],
+      "webhookId": "research-agent"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "video_topic",
+              "name": "video_topic",
+              "value": "={{ $json.body.video_topic }}",
+              "type": "string"
+            },
+            {
+              "id": "show_name",
+              "name": "show_name",
+              "value": "={{ $json.body.show_name }}",
+              "type": "string"
+            },
+            {
+              "id": "query_type",
+              "name": "query_type",
+              "value": "={{ $json.body.query_type || 'comprehensive' }}",
+              "type": "string"
+            },
+            {
+              "id": "top_k",
+              "name": "top_k",
+              "value": "={{ $json.body.top_k || 10 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "extract-params",
+      "name": "Extract Query Parameters",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [450, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Formulate research queries based on video topic\nconst videoTopic = $input.item.json.video_topic;\nconst showName = $input.item.json.show_name;\nconst queryType = $input.item.json.query_type;\n\nlet queries = [];\n\nif (queryType === 'comprehensive') {\n  // Generate multiple semantic search queries\n  queries = [\n    `${videoTopic} in ${showName}`,\n    `character analysis ${videoTopic} ${showName}`,\n    `episode information ${videoTopic} ${showName}`,\n    `fan theories about ${videoTopic} in ${showName}`,\n    `${videoTopic} relationships and arcs ${showName}`\n  ];\n} else if (queryType === 'character_focused') {\n  queries = [\n    `${videoTopic} character ${showName}`,\n    `${videoTopic} relationships ${showName}`,\n    `${videoTopic} character development ${showName}`\n  ];\n} else if (queryType === 'episode_focused') {\n  queries = [\n    `${videoTopic} episode ${showName}`,\n    `${videoTopic} plot summary ${showName}`,\n    `${videoTopic} episode analysis ${showName}`\n  ];\n} else {\n  // Single query\n  queries = [videoTopic];\n}\n\nreturn queries.map(query => ({\n  json: {\n    query: query,\n    video_topic: videoTopic,\n    show_name: showName,\n    top_k: $input.item.json.top_k\n  }\n}));"
+      },
+      "id": "formulate-queries",
+      "name": "Formulate Search Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 400]
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-small",
+        "options": {}
+      },
+      "id": "generate-query-embedding",
+      "name": "Generate Query Embedding",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1,
+      "position": [850, 400],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-api-key",
+          "name": "OpenAI API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "headerAuth",
+        "method": "POST",
+        "url": "https://api.pinecone.io/query",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Api-Key",
+              "value": "={{ $credentials.pineconeApiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"vector\": {{ $json.embedding }},\n  \"topK\": {{ $json.top_k }},\n  \"namespace\": \"research-data\",\n  \"includeMetadata\": true,\n  \"filter\": {\n    \"show_name\": { \"$eq\": \"{{ $json.show_name }}\" }\n  }\n}",
+        "options": {}
+      },
+      "id": "query-pinecone",
+      "name": "Query Pinecone Vector DB",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1050, 400],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "pinecone-api-key",
+          "name": "Pinecone API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract and process Pinecone results\nconst response = $input.item.json;\nconst query = $input.item.json.query;\n\nlet results = [];\n\nif (response.matches && response.matches.length > 0) {\n  results = response.matches.map(match => ({\n    id: match.id,\n    score: match.score,\n    metadata: match.metadata,\n    query: query\n  }));\n}\n\nreturn results.map(result => ({ json: result }));"
+      },
+      "id": "extract-results",
+      "name": "Extract Search Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 400]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "id": "aggregate-all-results",
+      "name": "Aggregate All Search Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [1450, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Organize and rank research results\nconst allResults = $input.all();\n\n// Group results by type\nlet organizedData = {\n  characters: [],\n  episodes: [],\n  enriched_analysis: [],\n  all_results: []\n};\n\nallResults.forEach(item => {\n  const result = item.json;\n  \n  if (result.metadata) {\n    if (result.metadata.type === 'character') {\n      organizedData.characters.push(result);\n    } else if (result.metadata.type === 'episode') {\n      organizedData.episodes.push(result);\n    } else if (result.metadata.type === 'enriched_analysis') {\n      organizedData.enriched_analysis.push(result);\n    }\n    \n    organizedData.all_results.push(result);\n  }\n});\n\n// Sort each category by relevance score\norganizedData.characters.sort((a, b) => b.score - a.score);\norganizedData.episodes.sort((a, b) => b.score - a.score);\norganizedData.enriched_analysis.sort((a, b) => b.score - a.score);\norganizedData.all_results.sort((a, b) => b.score - a.score);\n\n// Remove duplicates based on ID\nconst uniqueResults = {};\norganizedData.all_results = organizedData.all_results.filter(result => {\n  if (!uniqueResults[result.id]) {\n    uniqueResults[result.id] = true;\n    return true;\n  }\n  return false;\n});\n\nreturn { json: organizedData };"
+      },
+      "id": "organize-results",
+      "name": "Organize & Rank Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1650, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate comprehensive research context\nconst organizedData = $input.item.json;\nconst videoTopic = $('Extract Query Parameters').item.json.video_topic;\nconst showName = $('Extract Query Parameters').item.json.show_name;\n\nlet researchContext = {\n  video_topic: videoTopic,\n  show_name: showName,\n  research_completed_at: new Date().toISOString(),\n  total_results: organizedData.all_results.length,\n  character_data: {\n    count: organizedData.characters.length,\n    top_matches: organizedData.characters.slice(0, 5).map(c => ({\n      name: c.metadata.character_name,\n      relevance_score: c.score,\n      source: c.metadata.source\n    }))\n  },\n  episode_data: {\n    count: organizedData.episodes.length,\n    top_matches: organizedData.episodes.slice(0, 5).map(e => ({\n      title: e.metadata.episode_title,\n      episode_number: e.metadata.episode_number,\n      relevance_score: e.score,\n      source: e.metadata.source\n    }))\n  },\n  enriched_analysis: {\n    count: organizedData.enriched_analysis.length,\n    analyses: organizedData.enriched_analysis.map(a => ({\n      topic: a.metadata.topic,\n      enrichment_type: a.metadata.enrichment_type,\n      relevance_score: a.score,\n      citations: a.metadata.citations || []\n    }))\n  },\n  full_context: organizedData.all_results\n};\n\nreturn { json: researchContext };"
+      },
+      "id": "generate-context",
+      "name": "Generate Research Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1850, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"success\": true, \"research_data\": $json } }}",
+        "options": {}
+      },
+      "id": "respond-to-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2050, 400]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Query Parameters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Query Parameters": {
+      "main": [
+        [
+          {
+            "node": "Formulate Search Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formulate Search Queries": {
+      "main": [
+        [
+          {
+            "node": "Generate Query Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Query Embedding": {
+      "main": [
+        [
+          {
+            "node": "Query Pinecone Vector DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Pinecone Vector DB": {
+      "main": [
+        [
+          {
+            "node": "Extract Search Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Search Results": {
+      "main": [
+        [
+          {
+            "node": "Aggregate All Search Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate All Search Results": {
+      "main": [
+        [
+          {
+            "node": "Organize & Rank Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Organize & Rank Results": {
+      "main": [
+        [
+          {
+            "node": "Generate Research Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Research Context": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "id": "research-agent",
+  "meta": {
+    "instanceId": "research-layer"
+  },
+  "tags": []
+}

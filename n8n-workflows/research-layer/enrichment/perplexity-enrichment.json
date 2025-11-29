@@ -1,0 +1,236 @@
+{
+  "name": "Perplexity AI Enrichment - Research Layer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "enrich-with-perplexity",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "perplexity-enrichment"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "topic",
+              "name": "topic",
+              "value": "={{ $json.body.topic }}",
+              "type": "string"
+            },
+            {
+              "id": "show_name",
+              "name": "show_name",
+              "value": "={{ $json.body.show_name }}",
+              "type": "string"
+            },
+            {
+              "id": "enrichment_type",
+              "name": "enrichment_type",
+              "value": "={{ $json.body.enrichment_type || 'comprehensive' }}",
+              "type": "string"
+            },
+            {
+              "id": "context_data",
+              "name": "context_data",
+              "value": "={{ $json.body.context_data }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "extract-params",
+      "name": "Extract Parameters",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate Perplexity AI queries based on enrichment type\nconst topic = $input.item.json.topic;\nconst showName = $input.item.json.show_name;\nconst enrichmentType = $input.item.json.enrichment_type;\n\nlet queries = [];\n\nif (enrichmentType === 'fan_theories') {\n  queries = [\n    `What are the most popular fan theories about ${topic} in ${showName}?`,\n    `${showName} ${topic} fan theories and analysis`,\n    `Hidden meanings and Easter eggs in ${showName} related to ${topic}`\n  ];\n} else if (enrichmentType === 'character_analysis') {\n  queries = [\n    `Deep character analysis of ${topic} in ${showName}`,\n    `${topic} character arc and development in ${showName}`,\n    `${topic} relationships and motivations in ${showName}`\n  ];\n} else if (enrichmentType === 'episode_analysis') {\n  queries = [\n    `Critical analysis of ${topic} episode in ${showName}`,\n    `${showName} ${topic} themes and symbolism`,\n    `Behind the scenes and production details for ${topic} in ${showName}`\n  ];\n} else {\n  // Comprehensive enrichment\n  queries = [\n    `Comprehensive analysis of ${topic} in ${showName}`,\n    `${showName} ${topic} fan theories and interpretations`,\n    `${topic} character relationships and story arcs in ${showName}`,\n    `Critical reception and impact of ${topic} in ${showName}`\n  ];\n}\n\nreturn queries.map(query => ({\n  json: {\n    query: query,\n    topic: topic,\n    show_name: showName,\n    enrichment_type: enrichmentType\n  }\n}));"
+      },
+      "id": "generate-queries",
+      "name": "Generate Perplexity Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "headerAuth",
+        "method": "POST",
+        "url": "https://api.perplexity.ai/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $credentials.perplexityApiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llama-3.1-sonar-large-128k-online\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a research assistant specializing in analyzing TV shows, characters, and episodes. Provide detailed, well-researched information including fan theories, critical analysis, and contextual information. Focus on factual information and cite sources when possible.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $json.query }}\"\n    }\n  ],\n  \"temperature\": 0.2,\n  \"top_p\": 0.9,\n  \"return_citations\": true,\n  \"search_recency_filter\": \"month\"\n}",
+        "options": {}
+      },
+      "id": "call-perplexity-api",
+      "name": "Call Perplexity API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [850, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "perplexity-api-key",
+          "name": "Perplexity API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract and structure Perplexity response\nconst response = $input.item.json;\nconst query = $input.item.json.query;\n\nlet enrichedData = {\n  query: query,\n  topic: $input.item.json.topic,\n  show_name: $input.item.json.show_name,\n  enrichment_type: $input.item.json.enrichment_type,\n  content: '',\n  citations: [],\n  enriched_at: new Date().toISOString()\n};\n\nif (response.choices && response.choices.length > 0) {\n  enrichedData.content = response.choices[0].message.content;\n  \n  // Extract citations if available\n  if (response.citations) {\n    enrichedData.citations = response.citations;\n  }\n}\n\nreturn {\n  json: enrichedData\n};"
+      },
+      "id": "extract-response",
+      "name": "Extract Perplexity Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "id": "aggregate-results",
+      "name": "Aggregate All Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combine all enriched data into a comprehensive analysis\nconst allItems = $input.all();\n\nlet combinedAnalysis = {\n  topic: allItems[0].json.topic,\n  show_name: allItems[0].json.show_name,\n  enrichment_type: allItems[0].json.enrichment_type,\n  enriched_at: new Date().toISOString(),\n  queries_processed: allItems.length,\n  comprehensive_analysis: '',\n  all_citations: [],\n  data_type: 'perplexity_enrichment'\n};\n\n// Combine all content\nlet contentSections = [];\nallItems.forEach((item, index) => {\n  contentSections.push(`\\n### Query ${index + 1}: ${item.json.query}\\n`);\n  contentSections.push(item.json.content);\n  \n  if (item.json.citations && item.json.citations.length > 0) {\n    combinedAnalysis.all_citations.push(...item.json.citations);\n  }\n});\n\ncombinedAnalysis.comprehensive_analysis = contentSections.join('\\n\\n');\n\n// Remove duplicate citations\ncombinedAnalysis.all_citations = [...new Set(combinedAnalysis.all_citations)];\n\nreturn {\n  json: combinedAnalysis\n};"
+      },
+      "id": "combine-analysis",
+      "name": "Combine into Comprehensive Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1450, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"success\": true, \"enrichment_complete\": true, \"data\": $json } }}",
+        "options": {}
+      },
+      "id": "respond-to-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1650, 300]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Parameters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Parameters": {
+      "main": [
+        [
+          {
+            "node": "Generate Perplexity Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Perplexity Queries": {
+      "main": [
+        [
+          {
+            "node": "Call Perplexity API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Perplexity API": {
+      "main": [
+        [
+          {
+            "node": "Extract Perplexity Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Perplexity Response": {
+      "main": [
+        [
+          {
+            "node": "Aggregate All Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate All Results": {
+      "main": [
+        [
+          {
+            "node": "Combine into Comprehensive Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine into Comprehensive Analysis": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "id": "perplexity-enrichment",
+  "meta": {
+    "instanceId": "research-layer"
+  },
+  "tags": []
+}

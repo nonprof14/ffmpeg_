@@ -1,0 +1,243 @@
+{
+  "name": "Pinecone Vector Database Indexer - Research Layer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "index-to-pinecone",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "pinecone-indexer"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "data",
+              "name": "data",
+              "value": "={{ $json.body.data }}",
+              "type": "object"
+            },
+            {
+              "id": "data_type",
+              "name": "data_type",
+              "value": "={{ $json.body.data_type }}",
+              "type": "string"
+            },
+            {
+              "id": "namespace",
+              "name": "namespace",
+              "value": "={{ $json.body.namespace || 'research-data' }}",
+              "type": "string"
+            },
+            {
+              "id": "show_name",
+              "name": "show_name",
+              "value": "={{ $json.body.show_name }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "extract-params",
+      "name": "Extract Parameters",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare data chunks for embedding\nconst data = $input.item.json.data;\nconst dataType = $input.item.json.data_type;\nconst showName = $input.item.json.show_name;\n\nlet chunks = [];\n\nif (dataType === 'fandom_wiki') {\n  // Process character data\n  if (data.character_name) {\n    chunks.push({\n      id: `char_${showName}_${data.character_name}`.replace(/\\s+/g, '_').toLowerCase(),\n      text: `Character: ${data.character_name}\\n\\nBio: ${Array.isArray(data.character_bio) ? data.character_bio.join(' ') : data.character_bio}\\n\\nRelationships: ${data.relationships || 'N/A'}`,\n      metadata: {\n        type: 'character',\n        show_name: showName,\n        character_name: data.character_name,\n        source: 'fandom_wiki',\n        scraped_at: data.scraped_at\n      }\n    });\n  }\n  \n  // Process episode data\n  if (data.episode_title) {\n    chunks.push({\n      id: `ep_${showName}_${data.episode_number || data.episode_title}`.replace(/\\s+/g, '_').toLowerCase(),\n      text: `Episode: ${data.episode_title}\\n\\nNumber: ${data.episode_number}\\n\\nSummary: ${Array.isArray(data.episode_summary) ? data.episode_summary.join(' ') : data.episode_summary}\\n\\nTranscript: ${data.transcript || 'N/A'}`,\n      metadata: {\n        type: 'episode',\n        show_name: showName,\n        episode_title: data.episode_title,\n        episode_number: data.episode_number,\n        air_date: data.air_date,\n        source: 'fandom_wiki',\n        scraped_at: data.scraped_at\n      }\n    });\n  }\n} else if (dataType === 'perplexity_enrichment') {\n  // Process Perplexity enriched data\n  chunks.push({\n    id: `enriched_${showName}_${data.topic}`.replace(/\\s+/g, '_').toLowerCase(),\n    text: `Topic: ${data.topic}\\n\\nAnalysis:\\n${data.comprehensive_analysis}`,\n    metadata: {\n      type: 'enriched_analysis',\n      show_name: showName,\n      topic: data.topic,\n      enrichment_type: data.enrichment_type,\n      queries_processed: data.queries_processed,\n      citations: data.all_citations,\n      source: 'perplexity_ai',\n      enriched_at: data.enriched_at\n    }\n  });\n}\n\nreturn chunks.map(chunk => ({ json: chunk }));"
+      },
+      "id": "prepare-chunks",
+      "name": "Prepare Data Chunks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-small",
+        "options": {}
+      },
+      "id": "generate-embeddings",
+      "name": "Generate Embeddings (OpenAI)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1,
+      "position": [850, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-api-key",
+          "name": "OpenAI API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "headerAuth",
+        "method": "POST",
+        "url": "=https://api.pinecone.io/vectors/upsert",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Api-Key",
+              "value": "={{ $credentials.pineconeApiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"vectors\": [\n    {\n      \"id\": \"{{ $json.id }}\",\n      \"values\": {{ $json.embedding }},\n      \"metadata\": {{ $json.metadata }}\n    }\n  ],\n  \"namespace\": \"{{ $('Extract Parameters').item.json.namespace }}\"\n}",
+        "options": {}
+      },
+      "id": "upsert-to-pinecone",
+      "name": "Upsert to Pinecone",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1050, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "pinecone-api-key",
+          "name": "Pinecone API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "id": "aggregate-results",
+      "name": "Aggregate Upsert Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Summarize indexing results\nconst allItems = $input.all();\n\nlet summary = {\n  success: true,\n  vectors_indexed: allItems.length,\n  namespace: $('Extract Parameters').item.json.namespace,\n  show_name: $('Extract Parameters').item.json.show_name,\n  data_type: $('Extract Parameters').item.json.data_type,\n  indexed_at: new Date().toISOString(),\n  vector_ids: allItems.map(item => item.json.id || 'unknown')\n};\n\nreturn { json: summary };"
+      },
+      "id": "create-summary",
+      "name": "Create Indexing Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1450, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "respond-to-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1650, 300]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Parameters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Parameters": {
+      "main": [
+        [
+          {
+            "node": "Prepare Data Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Data Chunks": {
+      "main": [
+        [
+          {
+            "node": "Generate Embeddings (OpenAI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Embeddings (OpenAI)": {
+      "main": [
+        [
+          {
+            "node": "Upsert to Pinecone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert to Pinecone": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Upsert Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Upsert Results": {
+      "main": [
+        [
+          {
+            "node": "Create Indexing Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Indexing Summary": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "id": "pinecone-indexer",
+  "meta": {
+    "instanceId": "research-layer"
+  },
+  "tags": []
+}

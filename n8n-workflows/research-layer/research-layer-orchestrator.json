@@ -1,0 +1,381 @@
+{
+  "name": "Research Layer Orchestrator - Master Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "research-layer/orchestrate",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Main Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 500],
+      "webhookId": "research-orchestrator"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "operation",
+              "name": "operation",
+              "value": "={{ $json.body.operation }}",
+              "type": "string"
+            },
+            {
+              "id": "show_name",
+              "name": "show_name",
+              "value": "={{ $json.body.show_name }}",
+              "type": "string"
+            },
+            {
+              "id": "wiki_url",
+              "name": "wiki_url",
+              "value": "={{ $json.body.wiki_url }}",
+              "type": "string"
+            },
+            {
+              "id": "video_topic",
+              "name": "video_topic",
+              "value": "={{ $json.body.video_topic }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "extract-params",
+      "name": "Extract Parameters",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [450, 500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "initial-setup",
+              "leftValue": "={{ $json.operation }}",
+              "rightValue": "initial_setup",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "research-query",
+              "leftValue": "={{ $json.operation }}",
+              "rightValue": "research_query",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "enrich-data",
+              "leftValue": "={{ $json.operation }}",
+              "rightValue": "enrich_data",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "route-operation",
+      "name": "Route by Operation",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [650, 500]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.N8N_WEBHOOK_URL }}/scrape-fandom-wiki",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"wiki_url\": \"{{ $json.wiki_url }}\",\n  \"show_name\": \"{{ $json.show_name }}\",\n  \"scrape_type\": \"full\"\n}",
+        "options": {}
+      },
+      "id": "scrape-wiki",
+      "name": "1. Scrape Fandom Wiki",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract scraped data items for enrichment\nconst scrapedData = $input.item.json.data;\nlet items = [];\n\n// Create enrichment tasks for characters\nif (scrapedData.character_name) {\n  items.push({\n    topic: scrapedData.character_name,\n    show_name: scrapedData.show_name,\n    enrichment_type: 'character_analysis',\n    context_data: scrapedData\n  });\n}\n\n// Create enrichment tasks for episodes\nif (scrapedData.episode_title) {\n  items.push({\n    topic: scrapedData.episode_title,\n    show_name: scrapedData.show_name,\n    enrichment_type: 'episode_analysis',\n    context_data: scrapedData\n  });\n}\n\nreturn items.map(item => ({ json: item }));"
+      },
+      "id": "prepare-enrichment",
+      "name": "Prepare for Enrichment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.N8N_WEBHOOK_URL }}/enrich-with-perplexity",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "enrich-perplexity",
+      "name": "2. Enrich with Perplexity",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.N8N_WEBHOOK_URL }}/index-to-pinecone",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"data\": {{ $json.data }},\n  \"data_type\": \"perplexity_enrichment\",\n  \"show_name\": \"{{ $json.data.show_name }}\",\n  \"namespace\": \"research-data\"\n}",
+        "options": {}
+      },
+      "id": "index-enriched",
+      "name": "3. Index Enriched Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1450, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.N8N_WEBHOOK_URL }}/index-to-pinecone",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"data\": {{ $('1. Scrape Fandom Wiki').item.json.data }},\n  \"data_type\": \"fandom_wiki\",\n  \"show_name\": \"{{ $json.show_name }}\",\n  \"namespace\": \"research-data\"\n}",
+        "options": {}
+      },
+      "id": "index-wiki",
+      "name": "4. Index Wiki Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1450, 400]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "id": "merge-setup-results",
+      "name": "Merge Setup Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [1650, 350]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.N8N_WEBHOOK_URL }}/research-query",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"video_topic\": \"{{ $json.video_topic }}\",\n  \"show_name\": \"{{ $json.show_name }}\",\n  \"query_type\": \"comprehensive\",\n  \"top_k\": 10\n}",
+        "options": {}
+      },
+      "id": "query-research",
+      "name": "Query Research Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [850, 600]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.N8N_WEBHOOK_URL }}/enrich-with-perplexity",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"topic\": \"{{ $json.video_topic }}\",\n  \"show_name\": \"{{ $json.show_name }}\",\n  \"enrichment_type\": \"comprehensive\"\n}",
+        "options": {}
+      },
+      "id": "direct-enrich",
+      "name": "Direct Perplexity Enrichment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [850, 700]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1850, 500]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Main Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Parameters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Parameters": {
+      "main": [
+        [
+          {
+            "node": "Route by Operation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Operation": {
+      "main": [
+        [
+          {
+            "node": "1. Scrape Fandom Wiki",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Query Research Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Direct Perplexity Enrichment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1. Scrape Fandom Wiki": {
+      "main": [
+        [
+          {
+            "node": "Prepare for Enrichment",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "4. Index Wiki Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare for Enrichment": {
+      "main": [
+        [
+          {
+            "node": "2. Enrich with Perplexity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2. Enrich with Perplexity": {
+      "main": [
+        [
+          {
+            "node": "3. Index Enriched Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3. Index Enriched Data": {
+      "main": [
+        [
+          {
+            "node": "Merge Setup Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4. Index Wiki Data": {
+      "main": [
+        [
+          {
+            "node": "Merge Setup Results",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Setup Results": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Research Agent": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Direct Perplexity Enrichment": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "id": "research-layer-orchestrator",
+  "meta": {
+    "instanceId": "research-layer"
+  },
+  "tags": []
+}

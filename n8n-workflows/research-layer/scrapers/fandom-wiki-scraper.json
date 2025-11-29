@@ -1,0 +1,562 @@
+{
+  "name": "Fandom Wiki Scraper - Research Layer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "scrape-fandom-wiki",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "fandom-wiki-scraper"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "wiki_url",
+              "name": "wiki_url",
+              "value": "={{ $json.body.wiki_url }}",
+              "type": "string"
+            },
+            {
+              "id": "show_name",
+              "name": "show_name",
+              "value": "={{ $json.body.show_name }}",
+              "type": "string"
+            },
+            {
+              "id": "scrape_type",
+              "name": "scrape_type",
+              "value": "={{ $json.body.scrape_type || 'full' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "extract-params",
+      "name": "Extract Parameters",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "scrape-characters",
+              "leftValue": "={{ $json.scrape_type }}",
+              "rightValue": "characters",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "scrape-episodes",
+              "leftValue": "={{ $json.scrape_type }}",
+              "rightValue": "episodes",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "scrape-full",
+              "leftValue": "={{ $json.scrape_type }}",
+              "rightValue": "full",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "route-by-type",
+      "name": "Route by Scrape Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.wiki_url }}/wiki/Category:Characters",
+        "options": {
+          "allowUnauthorizedCerts": false
+        }
+      },
+      "id": "scrape-characters-page",
+      "name": "Scrape Characters Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [850, 200]
+    },
+    {
+      "parameters": {
+        "mode": "htmlExtract",
+        "sourceData": "={{ $json.body }}",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "character_links",
+              "cssSelector": ".category-page__member-link",
+              "returnValue": "attribute",
+              "attribute": "href",
+              "returnArray": true
+            },
+            {
+              "key": "character_names",
+              "cssSelector": ".category-page__member-link",
+              "returnValue": "text",
+              "returnArray": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "extract-character-links",
+      "name": "Extract Character Links",
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1,
+      "position": [1050, 200]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "character_links",
+        "options": {}
+      },
+      "id": "split-character-links",
+      "name": "Split Character Links",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [1250, 200]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.wiki_url }}{{ $json.character_links }}",
+        "options": {
+          "allowUnauthorizedCerts": false
+        }
+      },
+      "id": "scrape-character-page",
+      "name": "Scrape Character Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1450, 200]
+    },
+    {
+      "parameters": {
+        "mode": "htmlExtract",
+        "sourceData": "={{ $json.body }}",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "character_name",
+              "cssSelector": "h1.page-header__title",
+              "returnValue": "text"
+            },
+            {
+              "key": "character_bio",
+              "cssSelector": ".mw-parser-output > p",
+              "returnValue": "html",
+              "returnArray": true
+            },
+            {
+              "key": "infobox_data",
+              "cssSelector": ".portable-infobox",
+              "returnValue": "html"
+            },
+            {
+              "key": "relationships",
+              "cssSelector": "h2:contains('Relationships') + .mw-parser-output",
+              "returnValue": "text"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "extract-character-data",
+      "name": "Extract Character Data",
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1,
+      "position": [1650, 200]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.wiki_url }}/wiki/Category:Episodes",
+        "options": {
+          "allowUnauthorizedCerts": false
+        }
+      },
+      "id": "scrape-episodes-page",
+      "name": "Scrape Episodes Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [850, 400]
+    },
+    {
+      "parameters": {
+        "mode": "htmlExtract",
+        "sourceData": "={{ $json.body }}",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "episode_links",
+              "cssSelector": ".category-page__member-link",
+              "returnValue": "attribute",
+              "attribute": "href",
+              "returnArray": true
+            },
+            {
+              "key": "episode_titles",
+              "cssSelector": ".category-page__member-link",
+              "returnValue": "text",
+              "returnArray": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "extract-episode-links",
+      "name": "Extract Episode Links",
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1,
+      "position": [1050, 400]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "episode_links",
+        "options": {}
+      },
+      "id": "split-episode-links",
+      "name": "Split Episode Links",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [1250, 400]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.wiki_url }}{{ $json.episode_links }}",
+        "options": {
+          "allowUnauthorizedCerts": false
+        }
+      },
+      "id": "scrape-episode-page",
+      "name": "Scrape Episode Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1450, 400]
+    },
+    {
+      "parameters": {
+        "mode": "htmlExtract",
+        "sourceData": "={{ $json.body }}",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "episode_title",
+              "cssSelector": "h1.page-header__title",
+              "returnValue": "text"
+            },
+            {
+              "key": "episode_summary",
+              "cssSelector": ".mw-parser-output > p",
+              "returnValue": "text",
+              "returnArray": true
+            },
+            {
+              "key": "episode_number",
+              "cssSelector": ".pi-data[data-source='number'] .pi-data-value",
+              "returnValue": "text"
+            },
+            {
+              "key": "air_date",
+              "cssSelector": ".pi-data[data-source='airdate'] .pi-data-value",
+              "returnValue": "text"
+            },
+            {
+              "key": "transcript",
+              "cssSelector": "#Transcript + .mw-parser-output",
+              "returnValue": "text"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "extract-episode-data",
+      "name": "Extract Episode Data",
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1,
+      "position": [1650, 400]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "id": "merge-all-data",
+      "name": "Merge All Data",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [1850, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "data_type",
+              "name": "data_type",
+              "value": "fandom_wiki",
+              "type": "string"
+            },
+            {
+              "id": "scraped_at",
+              "name": "scraped_at",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "show_name",
+              "name": "show_name",
+              "value": "={{ $('Extract Parameters').item.json.show_name }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "add-metadata",
+      "name": "Add Metadata",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [2050, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"success\": true, \"items_scraped\": $items().length, \"data\": $json } }}",
+        "options": {}
+      },
+      "id": "respond-to-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2250, 300]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Parameters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Parameters": {
+      "main": [
+        [
+          {
+            "node": "Route by Scrape Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Scrape Type": {
+      "main": [
+        [
+          {
+            "node": "Scrape Characters Page",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Scrape Episodes Page",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Scrape Characters Page",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Scrape Episodes Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape Characters Page": {
+      "main": [
+        [
+          {
+            "node": "Extract Character Links",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Character Links": {
+      "main": [
+        [
+          {
+            "node": "Split Character Links",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Character Links": {
+      "main": [
+        [
+          {
+            "node": "Scrape Character Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape Character Page": {
+      "main": [
+        [
+          {
+            "node": "Extract Character Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Character Data": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape Episodes Page": {
+      "main": [
+        [
+          {
+            "node": "Extract Episode Links",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Episode Links": {
+      "main": [
+        [
+          {
+            "node": "Split Episode Links",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Episode Links": {
+      "main": [
+        [
+          {
+            "node": "Scrape Episode Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape Episode Page": {
+      "main": [
+        [
+          {
+            "node": "Extract Episode Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Episode Data": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge All Data": {
+      "main": [
+        [
+          {
+            "node": "Add Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Metadata": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "id": "fandom-wiki-scraper",
+  "meta": {
+    "instanceId": "research-layer"
+  },
+  "tags": []
+}
